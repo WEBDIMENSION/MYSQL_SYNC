@@ -1,0 +1,6 @@
+schemaspy/output/
+.env
+faker.php
+Docker/mysql/data/
+Docker/mysql/logs/
+Docker/mysql/backup/

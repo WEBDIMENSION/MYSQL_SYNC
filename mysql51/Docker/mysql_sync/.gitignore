@@ -1,0 +1,4 @@
+dump
+private_key
+scripts/sql/*.sql
+*_rsa

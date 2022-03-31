@@ -1,0 +1,52 @@
+version: '3'
+services:
+  mysql:
+    image: mysql:5.7
+    container_name: ${COMPOSE_PROJECT_NAME}_mysql5_7
+    volumes:
+      - ${DIR_PATH}/Docker/mysql/backup:/tmp/backup
+      - ${DIR_PATH}/Docker/mysql/data:/var/lib/mysql
+      - ${DIR_PATH}/Docker/mysql/init:/docker-entrypoint-initdb.d
+      - ${DIR_PATH}/Docker/mysql/logs:/var/log/mysql
+      - ${DIR_PATH}/Docker/mysql/my.cnf:/etc/my.cnf
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    ports:
+      - ${DB_EXTERNAL_PORT}:${DB_INTERNAL_PORT}
+    command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb_use_native_aio=0
+
+  mysql_sync:
+    build: Docker/mysql_sync
+    container_name: ${COMPOSE_PROJECT_NAME}_mysql_sync_57
+    environment:
+      TZ: Asia/Tokyo
+      MYSQL_SYNC_REMOTE_HOST_NAME: ${MYSQL_SYNC_REMOTE_HOST_NAME}
+      MYSQL_SYNC_REMOTE_HOST_PORT: ${MYSQL_SYNC_REMOTE_HOST_PORT}
+      MYSQL_SYNC_REMOTE_HOST_USER_NAME: ${MYSQL_SYNC_REMOTE_HOST_USER_NAME}
+      MYSQL_SYNC_REMOTE_HOST_USER_PASSWORD:      #require when REMOTE_RSA_AUTH=false, not working yet!
+      MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH: ${MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH}
+      MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH: ${MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH}
+      MYSQL_SYNC_REMOTE_HOST_RSA_AUTH: ${MYSQL_SYNC_REMOTE_HOST_RSA_AUTH}
+      MYSQL_SYNC_REMOTE_MYSQL_HOST: ${MYSQL_SYNC_REMOTE_MYSQL_HOST}
+      MYSQL_SYNC_REMOTE_MYSQL_PORT: ${MYSQL_SYNC_REMOTE_MYSQL_PORT}
+      MYSQL_SYNC_REMOTE_MYSQL_USER_NAME: ${MYSQL_SYNC_REMOTE_MYSQL_USER_NAME}
+      MYSQL_SYNC_REMOTE_MYSQL_USER_PASSWORD: ${MYSQL_SYNC_REMOTE_MYSQL_USER_PASSWORD}
+      MYSQL_SYNC_REMOTE_MYSQL_DATABASE_NAME: ${MYSQL_SYNC_REMOTE_MYSQL_DATABASE_NAME}
+      MYSQL_SYNC_REMOTE_DUMP_FILE_NAME_PREFIX: ${MYSQL_SYNC_REMOTE_DUMP_FILE_NAME_PREFIX}
+      MYSQL_SYNC_LOCAL_SAVE_PATH: ${MYSQL_SYNC_LOCAL_SAVE_PATH}
+      MYSQL_SYNC_MYSQL_SERVICE_NAME: $MYSQL_SYNC_MYSQL_SERVICE_NAME
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - ${DIR_PATH}/Docker/mysql_sync/dump:${MYSQL_SYNC_LOCAL_SAVE_PATH}:rw
+      - ${DIR_PATH}/Docker/mysql_sync/scripts/sync:/usr/local/bin/sync:rw
+      - ${DIR_PATH}/Docker/mysql_sync/scripts/sql:/usr/local/bin/sql:rw
+
+networks:
+  outside:
+    external: true

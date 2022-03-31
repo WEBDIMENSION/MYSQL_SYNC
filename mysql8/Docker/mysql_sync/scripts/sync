@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+
+# Variable check
+function display_env() {
+	display_start_section 'check variable'
+	echo MYSQL_SYNC_REMOTE_HOST_NAME
+	echo MYSQL_SYNC_REMOTE_HOST_PORT
+	echo MYSQL_SYNC_REMOTE_HOST_USER_NAME
+	echo MYSQL_SYNC_REMOTE_HOST_USER_PASSWORD
+	echo MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH
+	echo MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH
+	echo MYSQL_SYNC_REMOTE_HOST_RSA_AUTH
+	echo MYSQL_SYNC_REMOTE_MYSQL_HOST
+	echo MYSQL_SYNC_REMOTE_MYSQL_PORT
+	echo MYSQL_SYNC_REMOTE_MYSQL_USER_NAME
+	echo MYSQL_SYNC_REMOTE_MYSQL_USER_PASSWORD
+	echo MYSQL_SYNC_REMOTE_MYSQL_DATABASE_NAME
+	echo MYSQL_SYNC_REMOTE_DUMP_FILE_NAME_PREFIX
+	echo MYSQL_SYNC_LOCAL_SAVE_PATH
+	echo MYSQL_SYNC_MYSQL_SERVICE_NAME
+	echo '---'
+}
+
+# sqldump@remote
+# args:
+#   $1: filename
+function remote_dump() {
+	display_start_section 'Start Sync'
+	cat <<-_EOL_ | tee my.cnf >/dev/null
+	[client]
+	user=${MYSQL_SYNC_REMOTE_MYSQL_USER_NAME}
+	password=${MYSQL_SYNC_REMOTE_MYSQL_USER_PASSWORD}
+	_EOL_
+
+	scp -q -oStrictHostKeyChecking=no -P "$MYSQL_SYNC_REMOTE_HOST_PORT" -i "$MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH" my.cnf "$MYSQL_SYNC_REMOTE_HOST_USER_NAME"@"$MYSQL_SYNC_REMOTE_HOST_NAME":"$MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH"/my.cnf
+
+	MYSQL_SYNC_REMOTE_BACKUP_SCRIPT="
+	  cd $MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH &&
+	    mysqldump
+	    --defaults-extra-file=my.cnf
+	    --no-tablespaces
+	    -n
+	    -h $MYSQL_SYNC_REMOTE_MYSQL_HOST
+	    -B $MYSQL_SYNC_REMOTE_MYSQL_DATABASE_NAME
+	    -P $MYSQL_SYNC_REMOTE_MYSQL_PORT  > $1
+	  "
+	ssh -oStrictHostKeyChecking=no -p "$MYSQL_SYNC_REMOTE_HOST_PORT" -i "$MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH" "$MYSQL_SYNC_REMOTE_HOST_USER_NAME"@"$MYSQL_SYNC_REMOTE_HOST_NAME" $MYSQL_SYNC_REMOTE_BACKUP_SCRIPT
+	  MYSQL_SYNC_REMOTE_REMOVE_MY_CNF="
+	    rm ${MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH}/my.cnf
+	    "
+	ssh -oStrictHostKeyChecking=no -p "$MYSQL_SYNC_REMOTE_HOST_PORT" -i "$MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH" "$MYSQL_SYNC_REMOTE_HOST_USER_NAME"@"$MYSQL_SYNC_REMOTE_HOST_NAME" "$MYSQL_SYNC_REMOTE_REMOVE_MY_CNF"
+}
+
+# download dump file
+# args:
+#   $1: filename
+function pull_dump_file() {
+	display_notice_title "Dump from $(hostname)"
+	# shellcheck disable=SC2028
+	echo -n "\n"
+	if [ ! -d "$MYSQL_SYNC_LOCAL_SAVE_PATH" ]; then
+	  mkdir "$MYSQL_SYNC_LOCAL_SAVE_PATH"
+	fi
+	scp -q -oStrictHostKeyChecking=no -P "$MYSQL_SYNC_REMOTE_HOST_PORT" -i "$MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH" "$MYSQL_SYNC_REMOTE_HOST_USER_NAME"@"$MYSQL_SYNC_REMOTE_HOST_NAME":"$MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH"/"$1" "$MYSQL_SYNC_LOCAL_SAVE_PATH"/
+	if [ -e "$MYSQL_SYNC_LOCAL_SAVE_PATH"/"$1" ]; then
+		display_notice_title " Filename: $1"
+	else
+	  echo "Error: Can not download ${MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH}/$1"
+	  exit 1
+	fi
+}
+
+# remove dumpfilw@remote
+# args:
+#   $1: filename
+function remove_remote_dump_file() {
+	MYSQL_SYNC_REMOTE_BACKUP_REMOVE_SCRIPT="
+	  rm $MYSQL_SYNC_REMOTE_HOST_BACKUP_PATH/$1
+	  "
+	ssh -oStrictHostKeyChecking=no -p "$MYSQL_SYNC_REMOTE_HOST_PORT" -i "$MYSQL_SYNC_REMOTE_HOST_USER_KEY_PATH" "$MYSQL_SYNC_REMOTE_HOST_USER_NAME"@"$MYSQL_SYNC_REMOTE_HOST_NAME" "$MYSQL_SYNC_REMOTE_BACKUP_REMOVE_SCRIPT"
+}
+
+
+##########################################
+##############  replace   ################
+##########################################
+function replace(){
+	display_notice_title 'Replace'
+	function rewrite(){
+		sed -i -e "s/$2/$3/g" "$MYSQL_SYNC_LOCAL_SAVE_PATH"/"$1"
+		echo  Replae "$MYSQL_SYNC_LOCAL_SAVE_PATH"/"$1"  "$2" to "$3"
+	}
+	rewrite "$1" 'https:\/\/before.com' 'https:\/\/after.com'
+	rewrite "$1" 'before_word' 'after_word'
+}
+
+
+function restore(){
+	display_notice_title 'Create my.ini'
+	my_cnf="$(cd "$(dirname "$0")" && pwd)"/my.cnf
+	# function for create tmp my.cnf
+		function create_my_cnf() {
+		cat <<- _EOL_ | tee "$my_cnf" >/dev/null
+		[client]
+		user=${MYSQL_USER}
+		password=${MYSQL_PASSWORD}
+		_EOL_
+		}
+	# my.confがあれば削除してtmp my.cnf 作成
+	if [ ! -f "$my_cnf" ];
+	then
+		create_my_cnf
+	elif [ "$1" = 'ls' ]; then
+    dump_list_ls
+  elif [ "$1" = 'rm' ]; then
+    dump_list_remove
+    dump_list_ls
+	else
+	 rm -rf "$my_cnf"
+	 create_my_cnf
+	fi
+	# Restore sql
+	display_notice_title 'Restore'
+	echo "mysql --defaults-extra-file=$my_cnf -h $MYSQL_SYNC_MYSQL_SERVICE_NAME -D $MYSQL_DATABASE < $MYSQL_SYNC_LOCAL_SAVE_PATH/$1"
+	mysql --defaults-extra-file="$my_cnf" -h "$MYSQL_SYNC_MYSQL_SERVICE_NAME" -D "$MYSQL_DATABASE" < "$MYSQL_SYNC_LOCAL_SAVE_PATH"/"$1"
+	# After SQL
+	display_notice_title 'After SQL'
+	echo "mysql --defaults-extra-file=$my_cnf -h $MYSQL_SYNC_MYSQL_SERVICE_NAME -D $MYSQL_DATABASE < $(cd "$(dirname "$0")" && pwd)/sql/local_after.sql"
+	mysql --defaults-extra-file="$my_cnf" -h "$MYSQL_SYNC_MYSQL_SERVICE_NAME" -D "$MYSQL_DATABASE" < "$(cd "$(dirname "$0")" && pwd)"/sql/local_after.sql
+
+	## Delete my.cnf
+	rm "$my_cnf"
+
+}
+
+function latest_dumpfile(){
+	# shellcheck disable=SC2005
+	# shellcheck disable=SC2046
+	# shellcheck disable=SC2012
+	echo  $(cd "$MYSQL_SYNC_LOCAL_SAVE_PATH" && ls -lt dump_*.sql | head -n 1 | awk '{print $9}')
+}
+
+function display_start_section(){
+	echo $'\e[34m#####################################'
+	echo "###  $1"
+	echo $'#####################################\e[39m'
+}
+
+function display_notice_title(){
+	echo $'\e[92m###'  "$1"   $'\e[92m###\e[39m'
+}
+
+function dump_list_ls(){
+	display_start_section 'Dump list'
+  ls -lht "$MYSQL_SYNC_LOCAL_SAVE_PATH"
+}
+
+function dump_list_remove(){
+	display_start_section 'Remove dump files'
+  # shellcheck disable=SC2115
+  rm -rf "$MYSQL_SYNC_LOCAL_SAVE_PATH"/*
+}
+
+#display_env
+if [ "$1" = 'rb' ]; then
+	display_start_section 'Start  rollback'
+	display_notice_title 'Dump FileName'
+	dump_file_name=$(latest_dumpfile)
+	echo "$dump_file_name"
+	restore "$dump_file_name"
+elif [ "$1" = 'ls' ]; then
+  dump_list_ls
+elif [ "$1" = 'rm' ]; then
+  dump_list_remove
+  dump_list_ls
+else
+	dump_file_name=${MYSQL_SYNC_REMOTE_DUMP_FILE_NAME_PREFIX}${MYSQL_SYNC_REMOTE_MYSQL_DATABASE_NAME}_$(date "+%Y%m%d-%H%M%S").sql
+	remote_dump "$dump_file_name"
+	pull_dump_file "$dump_file_name"
+	remove_remote_dump_file "$dump_file_name"
+	replace "$dump_file_name"
+	restore "$dump_file_name"
+fi
+
+display_start_section 'END'
+
+
+
